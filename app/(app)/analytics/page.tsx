@@ -1,17 +1,18 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { fetchAnalytics, fetchCategories } from '@/lib/api';
+import { fetchExpenses, fetchCategories } from '@/lib/api';
 import { Expense, Category, SpendType } from '@/types';
-import { formatCurrency, getDateRange, cn } from '@/lib/utils';
-import { getCategoryMeta, SPEND_TYPE_CONFIG, SPEND_TYPE_ORDER } from '@/lib/categories';
+import { formatCurrency, getDateRange } from '@/lib/utils';
+import { SPEND_TYPE_CONFIG, SPEND_TYPE_ORDER } from '@/lib/categories';
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   BarChart, Bar,
 } from 'recharts';
-import { format, eachDayOfInterval, parseISO } from 'date-fns';
-import { SlidersHorizontal, X, Search } from 'lucide-react';
+import { format, eachDayOfInterval, startOfMonth, endOfMonth } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { SlidersHorizontal, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 const PERIOD_OPTIONS = [
   { id: 'month', label: 'This Month' },
@@ -25,108 +26,95 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState('month');
   const [loading, setLoading] = useState(true);
 
-  // Multi-select filters
+  // Filters
   const [showFilters, setShowFilters] = useState(false);
-  const [excludedCategoryIds, setExcludedCategoryIds] = useState<string[]>([]);
-  const [selectedSpendTypes, setSelectedSpendTypes] = useState<SpendType[]>([...SPEND_TYPE_ORDER]);
-  const [paidByFilter, setPaidByFilter] = useState<('husband'|'wife')[]>(['husband', 'wife']);
-  const [catFilterSearch, setCatFilterSearch] = useState('');
+  const [selectedTags, setSelectedTags] = useState<SpendType[]>([]);
+  const [excludedCatIds, setExcludedCatIds] = useState<string[]>([]);
+  const [selectedPaidBy, setSelectedPaidBy] = useState<'all' | 'husband' | 'wife'>('all');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const range = getDateRange(period);
       const [data, cats] = await Promise.all([
-        fetchAnalytics(range.from, range.to),
+        fetchExpenses({ from: range.from, to: range.to }),
         fetchCategories(),
       ]);
       setAllExpenses(data);
       setCategories(cats);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [period]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Apply multi-select filters client-side (cheap — already loaded for the period)
+  // Apply filters
   const expenses = useMemo(() => {
-    return allExpenses.filter(e =>
-      !excludedCategoryIds.includes(e.category_id) &&
-      selectedSpendTypes.includes(e.spend_type) &&
-      paidByFilter.includes(e.paid_by)
-    );
-  }, [allExpenses, excludedCategoryIds, selectedSpendTypes, paidByFilter]);
+    let e = allExpenses;
+    if (selectedTags.length > 0) e = e.filter(x => selectedTags.includes(x.spend_type));
+    if (excludedCatIds.length > 0) e = e.filter(x => !excludedCatIds.includes(x.category_id));
+    if (selectedPaidBy !== 'all') e = e.filter(x => x.paid_by === selectedPaidBy);
+    return e;
+  }, [allExpenses, selectedTags, excludedCatIds, selectedPaidBy]);
 
-  const toggleSpendType = (t: SpendType) => {
-    setSelectedSpendTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
-  };
-  const togglePaidBy = (p: 'husband'|'wife') => {
-    setPaidByFilter(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
-  };
-  const toggleCategoryExcluded = (id: string) => {
-    setExcludedCategoryIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-  const clearFilters = () => {
-    setExcludedCategoryIds([]);
-    setSelectedSpendTypes([...SPEND_TYPE_ORDER]);
-    setPaidByFilter(['husband', 'wife']);
-    setCatFilterSearch('');
-  };
+  const hasFilters = selectedTags.length > 0 || excludedCatIds.length > 0 || selectedPaidBy !== 'all';
 
-  const activeFilterCount = excludedCategoryIds.length
-    + (SPEND_TYPE_ORDER.length - selectedSpendTypes.length)
-    + (2 - paidByFilter.length);
+  const toggleTag = (t: SpendType) =>
+    setSelectedTags(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
+  const toggleExcludeCat = (id: string) =>
+    setExcludedCatIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
-  if (loading) {
-    return (
-      <div className="px-4 pt-4 pb-6 space-y-4">
-        <div className="h-8 w-32 bg-[var(--muted)] rounded-xl animate-pulse" />
-        {[1,2,3,4].map(i => <div key={i} className="h-48 bg-[var(--muted)] rounded-3xl animate-pulse" />)}
-      </div>
-    );
-  }
-
-  // Compute stats
+  // ── Stats ──────────────────────────────────────────────────
   const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const avgDay = total / Math.max(1, expenses.length > 0
-    ? Math.ceil((new Date(expenses[expenses.length - 1]?.created_at || Date.now()).getTime() - new Date(expenses[0]?.created_at || Date.now()).getTime()) / 86400000) + 1
-    : 1);
+  const txCount = expenses.length;
 
-  // Category breakdown
-  const catMap: Record<string, { name: string; amount: number; icon: string; color: string }> = {};
-  expenses.forEach(e => {
-    const id = e.category_id;
-    if (!catMap[id]) {
-      catMap[id] = {
-        name: e.category?.name || 'Unknown',
-        amount: 0,
-        icon: e.category?.icon || getCategoryMeta(e.category?.name||"").icon,
-        color: e.category?.color || getCategoryMeta(e.category?.name||"").color,
-      };
-    }
-    catMap[id].amount += Number(e.amount);
-  });
-  const catData = Object.values(catMap).sort((a, b) => b.amount - a.amount);
-  const topCategory = catData[0];
+  // Spend-type breakdown with count
+  const tagBreakdown = useMemo(() => {
+    const map: Record<string, { amount: number; count: number }> = {};
+    expenses.forEach(e => {
+      if (!map[e.spend_type]) map[e.spend_type] = { amount: 0, count: 0 };
+      map[e.spend_type].amount += Number(e.amount);
+      map[e.spend_type].count += 1;
+    });
+    return map;
+  }, [expenses]);
 
-  // Daily trend
+  // Category breakdown with count and amount
+  const catBreakdown = useMemo(() => {
+    const map: Record<string, { name: string; icon: string; color: string; amount: number; count: number }> = {};
+    expenses.forEach(e => {
+      const id = e.category_id;
+      if (!map[id]) {
+        map[id] = {
+          name: e.category?.name || 'Unknown',
+          icon: e.category?.icon || '📦',
+          color: e.category?.color || '#6B7280',
+          amount: 0,
+          count: 0,
+        };
+      }
+      map[id].amount += Number(e.amount);
+      map[id].count += 1;
+    });
+    return Object.values(map).sort((a, b) => b.amount - a.amount);
+  }, [expenses]);
+
+  const topCategory = catBreakdown[0];
+
+  // Daily trend for the selected period
   const range = getDateRange(period);
-  const days = eachDayOfInterval({
-    start: new Date(range.from),
-    end: new Date(range.to),
-  });
+  const days = eachDayOfInterval({ start: new Date(range.from), end: new Date(range.to) });
   const dailyMap: Record<string, number> = {};
   expenses.forEach(e => {
-    const d = format(parseISO(e.created_at), 'MMM dd');
-    dailyMap[d] = (dailyMap[d] || 0) + Number(e.amount);
+    const d = e.expense_date || e.created_at?.slice(0, 10);
+    if (d) dailyMap[d] = (dailyMap[d] || 0) + Number(e.amount);
   });
   const trendData = days.map(d => ({
     date: format(d, 'MMM dd'),
-    amount: dailyMap[format(d, 'MMM dd')] || 0,
-  })).filter((_, i, arr) => arr.some(x => x.amount > 0) || i < 7);
+    key: format(d, 'yyyy-MM-dd'),
+    amount: 0,
+  })).map(d => ({ ...d, amount: dailyMap[d.key] || 0 }));
 
-  // Person data
+  // Person split
   const husbandTotal = expenses.filter(e => e.paid_by === 'husband').reduce((s, e) => s + Number(e.amount), 0);
   const wifeTotal = expenses.filter(e => e.paid_by === 'wife').reduce((s, e) => s + Number(e.amount), 0);
   const personData = [
@@ -134,133 +122,116 @@ export default function AnalyticsPage() {
     { name: 'Wife', amount: wifeTotal, fill: 'var(--wife)' },
   ];
 
-  const filteredCategoryList = catFilterSearch.trim()
-    ? categories.filter(c => c.name.toLowerCase().includes(catFilterSearch.trim().toLowerCase()))
-    : categories;
+  if (loading) {
+    return (
+      <div className="px-4 pt-4 py-5 space-y-4">
+        <div className="h-8 w-32 bg-[var(--muted)] rounded-xl animate-pulse" />
+        {[1, 2, 3].map(i => <div key={i} className="h-48 bg-[var(--muted)] rounded-3xl animate-pulse" />)}
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <div className="py-4 flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center justify-between py-4">
         <h1 className="text-xl font-bold text-[var(--foreground)]">Analytics</h1>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={cn(
             'flex items-center gap-1.5 px-3 py-2 rounded-2xl text-xs font-semibold transition-all',
-            activeFilterCount > 0 || showFilters
+            showFilters || hasFilters
               ? 'bg-[var(--primary)] text-white'
               : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
           )}
         >
-          {activeFilterCount > 0 ? <X size={14} /> : <SlidersHorizontal size={14} />}
-          Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          {hasFilters ? <X size={13} /> : <SlidersHorizontal size={13} />}
+          {hasFilters ? 'Filtered' : 'Filter'}
         </button>
       </div>
 
       {/* Period selector */}
       <div className="flex gap-2 mb-4">
         {PERIOD_OPTIONS.map(p => (
-          <button
-            key={p.id}
-            onClick={() => setPeriod(p.id)}
+          <button key={p.id} onClick={() => setPeriod(p.id)}
             className={cn(
-              'flex-1 py-2.5 rounded-2xl text-sm font-medium transition-all',
-              period === p.id
-                ? 'bg-[var(--primary)] text-white shadow-sm'
-                : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
-            )}
-          >
+              'flex-1 py-2.5 rounded-2xl text-xs font-semibold transition-all',
+              period === p.id ? 'bg-[var(--primary)] text-white shadow-sm' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+            )}>
             {p.label}
           </button>
         ))}
       </div>
 
-      {/* Multi-select filter panel */}
+      {/* Filter panel */}
       {showFilters && (
-        <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-4 mb-4 animate-slide-up space-y-4">
-          {/* Spend type multi-select */}
+        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 mb-4 space-y-4 animate-slide-up">
+          {/* Tag filter */}
           <div>
-            <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-2">Tags</p>
-            <div className="flex gap-2 flex-wrap">
+            <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-2">
+              Include tags (empty = all)
+            </p>
+            <div className="flex flex-wrap gap-2">
               {SPEND_TYPE_ORDER.map(t => {
                 const cfg = SPEND_TYPE_CONFIG[t];
-                const active = selectedSpendTypes.includes(t);
+                const active = selectedTags.includes(t);
                 return (
-                  <button
-                    key={t}
-                    onClick={() => toggleSpendType(t)}
+                  <button key={t} onClick={() => toggleTag(t)}
                     className={cn(
-                      'px-3 py-1.5 rounded-xl text-xs font-medium transition-all',
-                      active ? 'text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)] opacity-50'
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
+                      active ? 'text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
                     )}
-                    style={active ? { backgroundColor: cfg.color } : {}}
-                  >
+                    style={active ? { backgroundColor: cfg.color } : {}}>
                     {cfg.icon} {cfg.label}
+                    {active && <span className="text-white/80">✓</span>}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Paid by multi-select */}
-          <div>
-            <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-2">Paid by</p>
-            <div className="flex gap-2">
-              {(['husband', 'wife'] as const).map(p => {
-                const active = paidByFilter.includes(p);
-                return (
-                  <button key={p} onClick={() => togglePaidBy(p)}
-                    className={cn(
-                      'flex-1 py-2 rounded-xl text-xs font-medium capitalize transition-all',
-                      active ? 'text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)] opacity-50'
-                    )}
-                    style={active ? { backgroundColor: p === 'husband' ? 'var(--husband)' : 'var(--wife)' } : {}}>
-                    {p === 'husband' ? '👨 Husband' : '👩 Wife'}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Category exclusion multi-select */}
+          {/* Exclude categories */}
           <div>
             <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-2">
               Exclude categories
             </p>
-            <div className="relative mb-2">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
-              <input
-                value={catFilterSearch}
-                onChange={e => setCatFilterSearch(e.target.value)}
-                placeholder="Search categories..."
-                className="w-full bg-[var(--muted)] rounded-xl pl-8 pr-3 py-2 text-xs text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none"
-              />
-            </div>
-            <div className="flex gap-2 flex-wrap max-h-32 overflow-y-auto">
-              {filteredCategoryList.map(c => {
-                const excluded = excludedCategoryIds.includes(c.id);
+            <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+              {categories.map(c => {
+                const excluded = excludedCatIds.includes(c.id);
                 return (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleCategoryExcluded(c.id)}
+                  <button key={c.id} onClick={() => toggleExcludeCat(c.id)}
                     className={cn(
-                      'px-3 py-1.5 rounded-xl text-xs font-medium transition-all',
+                      'flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all',
                       excluded
-                        ? 'bg-red-50 text-red-400 line-through dark:bg-red-950/30'
-                        : 'bg-[var(--muted)] text-[var(--foreground)]'
-                    )}
-                  >
+                        ? 'bg-red-500 text-white line-through'
+                        : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+                    )}>
                     {c.icon} {c.name}
                   </button>
                 );
               })}
             </div>
-            <p className="text-[10px] text-[var(--muted-foreground)] mt-2">
-              Tap a category to exclude it from this analysis — handy for leaving out Investments or EMI when looking at lifestyle spend.
-            </p>
           </div>
 
-          <button onClick={clearFilters} className="text-xs text-[var(--primary)] font-semibold">
-            Reset all filters
+          {/* Paid by */}
+          <div>
+            <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-2">Paid by</p>
+            <div className="flex gap-2">
+              {(['all', 'husband', 'wife'] as const).map(p => (
+                <button key={p} onClick={() => setSelectedPaidBy(p)}
+                  className={cn(
+                    'flex-1 py-2 rounded-xl text-xs font-semibold capitalize transition-all',
+                    selectedPaidBy === p ? 'bg-[var(--primary)] text-white' : 'bg-[var(--muted)] text-[var(--muted-foreground)]'
+                  )}>
+                  {p === 'all' ? 'Both' : p}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={() => { setSelectedTags([]); setExcludedCatIds([]); setSelectedPaidBy('all'); }}
+            className="text-xs text-[var(--primary)] font-semibold">
+            Clear all filters
           </button>
         </div>
       )}
@@ -268,123 +239,152 @@ export default function AnalyticsPage() {
       {expenses.length === 0 ? (
         <div className="text-center py-16 text-[var(--muted-foreground)]">
           <p className="text-4xl mb-2">📊</p>
-          <p className="font-medium">No data matches these filters</p>
+          <p className="font-medium">No data for this period</p>
+          {hasFilters && <p className="text-sm mt-1">Try adjusting your filters</p>}
         </div>
       ) : (
         <div className="space-y-4">
           {/* Summary cards */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-[var(--card)] rounded-3xl p-4 border border-[var(--border)]">
+            <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
               <p className="text-xs text-[var(--muted-foreground)] uppercase tracking-wider mb-1">Total</p>
               <p className="text-xl font-bold text-[var(--foreground)]">{formatCurrency(total)}</p>
             </div>
-            <div className="bg-[var(--card)] rounded-3xl p-4 border border-[var(--border)]">
+            <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
               <p className="text-xs text-[var(--muted-foreground)] uppercase tracking-wider mb-1">Transactions</p>
-              <p className="text-xl font-bold text-[var(--foreground)]">{expenses.length}</p>
+              <p className="text-xl font-bold text-[var(--foreground)]">{txCount}</p>
             </div>
-            <div className="bg-[var(--card)] rounded-3xl p-4 border border-[var(--border)]">
+            <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
               <p className="text-xs text-[var(--muted-foreground)] uppercase tracking-wider mb-1">Top Category</p>
               <p className="text-sm font-bold text-[var(--foreground)] truncate">
-                {topCategory?.icon} {topCategory?.name}
+                {topCategory ? `${topCategory.icon} ${topCategory.name}` : '—'}
+              </p>
+              {topCategory && (
+                <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                  {topCategory.count} {topCategory.count === 1 ? 'time' : 'times'}
+                </p>
+              )}
+            </div>
+            <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+              <p className="text-xs text-[var(--muted-foreground)] uppercase tracking-wider mb-1">Avg / Day</p>
+              <p className="text-xl font-bold text-[var(--foreground)]">
+                {formatCurrency(total / Math.max(days.length, 1))}
               </p>
             </div>
-            <div className="bg-[var(--card)] rounded-3xl p-4 border border-[var(--border)]">
-              <p className="text-xs text-[var(--muted-foreground)] uppercase tracking-wider mb-1">Avg / Day</p>
-              <p className="text-xl font-bold text-[var(--foreground)]">{formatCurrency(avgDay)}</p>
+          </div>
+
+          {/* Tag breakdown with counts — updates with period & filters */}
+          <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+            <p className="text-sm font-bold text-[var(--foreground)] mb-3">By Tag</p>
+            <div className="space-y-2.5">
+              {SPEND_TYPE_ORDER.map(t => {
+                const cfg = SPEND_TYPE_CONFIG[t];
+                const data = tagBreakdown[t];
+                if (!data) return null;
+                const pct = total > 0 ? (data.amount / total) * 100 : 0;
+                return (
+                  <div key={t}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{cfg.icon}</span>
+                        <span className="text-sm font-semibold text-[var(--foreground)]">{cfg.label}</span>
+                        <span className="text-xs text-[var(--muted-foreground)] bg-[var(--muted)] px-2 py-0.5 rounded-lg">
+                          {data.count}×
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-bold text-[var(--foreground)]">{formatCurrency(data.amount)}</span>
+                        <span className="text-xs text-[var(--muted-foreground)] ml-2">{pct.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                    <div className="h-1.5 bg-[var(--muted)] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%`, backgroundColor: cfg.color }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Category breakdown with count */}
+          <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+            <p className="text-sm font-bold text-[var(--foreground)] mb-3">By Category</p>
+            <div className="space-y-3">
+              {catBreakdown.map((c, i) => {
+                const pct = total > 0 ? (c.amount / total) * 100 : 0;
+                return (
+                  <div key={i}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-8 h-8 rounded-xl flex items-center justify-center text-base flex-shrink-0"
+                        style={{ backgroundColor: c.color + '20' }}>
+                        {c.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-[var(--foreground)] truncate">{c.name}</span>
+                          <span className="text-xs font-bold text-[var(--foreground)] ml-2 flex-shrink-0">
+                            {formatCurrency(c.amount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            {c.count} {c.count === 1 ? 'transaction' : 'transactions'}
+                          </span>
+                          <span className="text-[10px] text-[var(--muted-foreground)]">{pct.toFixed(0)}%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="h-1 bg-[var(--muted)] rounded-full overflow-hidden ml-11">
+                      <div className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${pct}%`, backgroundColor: c.color }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
           {/* Category Pie */}
-          <div className="bg-[var(--card)] rounded-3xl p-5 border border-[var(--border)]">
-            <h3 className="font-semibold text-[var(--foreground)] mb-4">By Category</h3>
-            <ResponsiveContainer width="100%" height={200}>
+          <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+            <p className="text-sm font-bold text-[var(--foreground)] mb-3">Category Distribution</p>
+            <ResponsiveContainer width="100%" height={180}>
               <PieChart>
-                <Pie
-                  data={catData}
-                  dataKey="amount"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  innerRadius={48}
-                >
-                  {catData.map((c) => (
-                    <Cell key={c.name} fill={c.color} />
-                  ))}
+                <Pie data={catBreakdown} dataKey="amount" nameKey="name"
+                  cx="50%" cy="50%" outerRadius={75} innerRadius={45}>
+                  {catBreakdown.map((c, i) => <Cell key={i} fill={c.color} />)}
                 </Pie>
-                <Tooltip
-                  formatter={(v: number) => formatCurrency(v)}
-                  contentStyle={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '1rem',
-                    fontSize: '12px',
-                  }}
-                />
+                <Tooltip formatter={(v: number) => formatCurrency(v)}
+                  contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '1rem', fontSize: '12px' }} />
               </PieChart>
             </ResponsiveContainer>
-            <div className="space-y-2 mt-2">
-              {catData.slice(0, 6).map(c => (
-                <div key={c.name} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                  <span className="text-xs text-[var(--foreground)] flex-1 truncate">{c.name}</span>
-                  <span className="text-xs font-semibold text-[var(--foreground)]">{formatCurrency(c.amount)}</span>
-                  <span className="text-[10px] text-[var(--muted-foreground)] w-10 text-right">
-                    {((c.amount / total) * 100).toFixed(0)}%
-                  </span>
-                </div>
-              ))}
-            </div>
           </div>
 
           {/* Daily trend */}
-          <div className="bg-[var(--card)] rounded-3xl p-5 border border-[var(--border)]">
-            <h3 className="font-semibold text-[var(--foreground)] mb-4">Daily Trend</h3>
-            <ResponsiveContainer width="100%" height={160}>
+          <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+            <p className="text-sm font-bold text-[var(--foreground)] mb-3">Daily Trend</p>
+            <ResponsiveContainer width="100%" height={150}>
               <LineChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} tickFormatter={v => `₹${v}`} />
-                <Tooltip
-                  formatter={(v: number) => formatCurrency(v)}
-                  contentStyle={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '1rem',
-                    fontSize: '12px',
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="amount"
-                  stroke="var(--primary)"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} tickFormatter={v => `₹${v}`} />
+                <Tooltip formatter={(v: number) => formatCurrency(v)}
+                  contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '1rem', fontSize: '12px' }} />
+                <Line type="monotone" dataKey="amount" stroke="var(--primary)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Person bar chart */}
-          <div className="bg-[var(--card)] rounded-3xl p-5 border border-[var(--border)]">
-            <h3 className="font-semibold text-[var(--foreground)] mb-4">Husband vs Wife</h3>
-            <ResponsiveContainer width="100%" height={140}>
+          {/* Person split */}
+          <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+            <p className="text-sm font-bold text-[var(--foreground)] mb-3">Husband vs Wife</p>
+            <ResponsiveContainer width="100%" height={130}>
               <BarChart data={personData} barSize={48}>
-                <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} tickFormatter={v => `₹${v}`} />
-                <Tooltip
-                  formatter={(v: number) => formatCurrency(v)}
-                  contentStyle={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '1rem',
-                    fontSize: '12px',
-                  }}
-                />
+                <YAxis tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} tickFormatter={v => `₹${v}`} />
+                <Tooltip formatter={(v: number) => formatCurrency(v)}
+                  contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: '1rem', fontSize: '12px' }} />
                 <Bar dataKey="amount" radius={[8, 8, 0, 0]}>
-                  {personData.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
-                  ))}
+                  {personData.map((e, i) => <Cell key={i} fill={e.fill} />)}
                 </Bar>
                 <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--foreground)' }} tickLine={false} axisLine={false} />
               </BarChart>

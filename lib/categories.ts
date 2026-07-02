@@ -1,11 +1,3 @@
-// ============================================================
-// Duoxpnse — Spend Type Configuration
-// Categories themselves now live in the DATABASE (categories table).
-// This file only defines the top-level spend type tags and a
-// fallback icon/color lookup for categories that predate the
-// icon/color columns.
-// ============================================================
-
 import type { SpendType } from '@/types';
 
 export const SPEND_TYPE_CONFIG: Record<SpendType, {
@@ -32,25 +24,24 @@ export const SPEND_TYPE_CONFIG: Record<SpendType, {
     bg: '#F3E8FF',
     desc: 'Splurge & indulgence',
   },
-  debt_loan: {
-    label: 'Debt / Loan',
+  money_lent: {
+    label: 'Money Lent',
     icon: '🤝',
     color: '#2563EB',
     bg: '#DBEAFE',
-    desc: 'Money lent or borrowed',
+    desc: 'Money given to someone',
   },
   investing: {
     label: 'Investing',
     icon: '📈',
-    color: '#16A34A',
+    color: '#059669',
     bg: '#D1FAE5',
     desc: 'Savings, SIPs & investments',
   },
 };
 
-export const SPEND_TYPE_ORDER: SpendType[] = ['need', 'want', 'luxury', 'debt_loan', 'investing'];
+export const SPEND_TYPE_ORDER: SpendType[] = ['need', 'want', 'luxury', 'money_lent', 'investing'];
 
-// Fallback icon/color for categories created before icon/color columns existed
 const FALLBACK_META: Record<string, { icon: string; color: string }> = {
   'Miscellaneous': { icon: '📦', color: '#6B7280' },
 };
@@ -59,7 +50,6 @@ export function getCategoryMeta(name: string): { icon: string; color: string } {
   return FALLBACK_META[name] || { icon: '📦', color: '#6B7280' };
 }
 
-// A reasonable emoji picker palette for the "add category" UI
 export const ICON_CHOICES: string[] = [
   '🛒','🍽️','🍵','☕','🍰','🏠','✨','💡','🧴','🛍️','👗','🚗','✈️',
   '💊','🏋️','🧘','📚','📈','📖','🎓','🎬','🎮','🎉','💎','🍷','🎁',

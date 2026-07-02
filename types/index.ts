@@ -1,5 +1,7 @@
 export type PaidBy = 'husband' | 'wife';
-export type SpendType = 'need' | 'want' | 'luxury' | 'debt_loan' | 'investing';
+// First-layer tags only — Money Borrowed and Loan removed as per request.
+// Loan Repayment is a second-layer category, not a tag.
+export type SpendType = 'need' | 'want' | 'luxury' | 'money_lent' | 'investing';
 
 export interface Category {
   id: string;
@@ -9,7 +11,7 @@ export interface Category {
   is_default: boolean;
   created_at: string;
   budget_limit?: number;
-  spend_types?: SpendType[];   // legacy field, no longer used for filtering
+  spend_types?: SpendType[];
 }
 
 export interface Expense {
@@ -20,7 +22,7 @@ export interface Expense {
   paid_by: PaidBy;
   spend_type: SpendType;
   notes?: string;
-  expense_date: string;   // user-chosen date (YYYY-MM-DD)
+  expense_date: string;
   created_at: string;
   updated_at: string;
   is_deleted?: boolean;
@@ -29,8 +31,8 @@ export interface Expense {
 export interface FilterOptions {
   dateFrom?: string;
   dateTo?: string;
-  categoryIds?: string[];      // multi-select
+  categoryIds?: string[];
   paidBy?: PaidBy | 'all';
-  spendTypes?: SpendType[];    // multi-select
+  spendTypes?: SpendType[];
   searchQuery?: string;
 }

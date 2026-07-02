@@ -86,11 +86,11 @@ export default function DashboardPage() {
 
   // Spend type breakdown
   const spendBreakdown = {
-    need:      (stats?.recentExpenses||[]).filter(e=>e.spend_type==='need').reduce((s,e)=>s+Number(e.amount),0),
-    want:      (stats?.recentExpenses||[]).filter(e=>e.spend_type==='want').reduce((s,e)=>s+Number(e.amount),0),
-    luxury:    (stats?.recentExpenses||[]).filter(e=>e.spend_type==='luxury').reduce((s,e)=>s+Number(e.amount),0),
-    debt_loan: (stats?.recentExpenses||[]).filter(e=>e.spend_type==='debt_loan').reduce((s,e)=>s+Number(e.amount),0),
-    investing: (stats?.recentExpenses||[]).filter(e=>e.spend_type==='investing').reduce((s,e)=>s+Number(e.amount),0),
+    need:       (stats?.recentExpenses||[]).filter(e=>e.spend_type==='need').reduce((s,e)=>s+Number(e.amount),0),
+    want:       (stats?.recentExpenses||[]).filter(e=>e.spend_type==='want').reduce((s,e)=>s+Number(e.amount),0),
+    luxury:     (stats?.recentExpenses||[]).filter(e=>e.spend_type==='luxury').reduce((s,e)=>s+Number(e.amount),0),
+    money_lent: (stats?.recentExpenses||[]).filter(e=>e.spend_type==='money_lent').reduce((s,e)=>s+Number(e.amount),0),
+    investing:  (stats?.recentExpenses||[]).filter(e=>e.spend_type==='investing').reduce((s,e)=>s+Number(e.amount),0),
   };
 
   const totalSplit = (stats?.totalHusband||0) + (stats?.totalWife||0);
@@ -172,7 +172,7 @@ export default function DashboardPage() {
           <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 mb-5">
             <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-3">Spending Breakdown</p>
             <div className="grid grid-cols-3 gap-2">
-              {(['need','want','luxury','debt_loan','investing'] as const)
+              {(['need','want','luxury','money_lent','investing'] as const)
                 .filter(t => spendBreakdown[t] > 0 || t === 'need' || t === 'want' || t === 'luxury')
                 .map(t => {
                 const cfg = SPEND_TYPE_CONFIG[t];
