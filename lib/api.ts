@@ -131,24 +131,26 @@ export async function deleteExpense(id: string): Promise<void> {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────
-export async function fetchDashboardStats() {
+export async function fetchDashboardStats(monthStart?: string, monthEnd?: string) {
   const now = new Date();
   const today = now.toISOString().slice(0,10);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-  const monthEnd   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+  const mStart = monthStart || new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const mEnd   = monthEnd   || new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
 
   const base = () => supabase.from('expenses').select('amount').eq('is_deleted', false);
 
   const [todayData, monthData, husbandData, wifeData, recentData] = await Promise.all([
     base().eq('expense_date', today),
-    base().gte('expense_date', monthStart).lte('expense_date', monthEnd),
-    base().eq('paid_by','husband').gte('expense_date', monthStart).lte('expense_date', monthEnd),
-    base().eq('paid_by','wife').gte('expense_date', monthStart).lte('expense_date', monthEnd),
+    base().gte('expense_date', mStart).lte('expense_date', mEnd),
+    base().eq('paid_by','husband').gte('expense_date', mStart).lte('expense_date', mEnd),
+    base().eq('paid_by','wife').gte('expense_date', mStart).lte('expense_date', mEnd),
     supabase.from('expenses').select('*, category:categories(*)')
       .eq('is_deleted', false)
+      .gte('expense_date', mStart)
+      .lte('expense_date', mEnd)
       .order('expense_date',{ascending:false})
       .order('created_at',{ascending:false})
-      .limit(20),
+      .limit(50),
   ]);
 
   const sum = (rows: {amount:number}[]|null) => (rows||[]).reduce((a,r)=>a+Number(r.amount),0);
